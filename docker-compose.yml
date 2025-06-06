@@ -1,0 +1,66 @@
+services:
+
+  db:
+    image: postgres:15
+    container_name: hopen_integration_db
+    env_file:
+      - .env
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: [ "CMD-SHELL", "pg_isready -U postgres" ]
+      interval: 5s
+      timeout: 10s
+      retries: 5
+
+  web:
+    container_name: hopen_integration_web
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+
+  celery_worker:
+    build: .
+    container_name: hopen_integration_worker
+    restart: unless-stopped
+    command: celery -A core worker -l info -Q high_priority
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+    env_file:
+      - .env
+
+  celery_beat:
+    container_name: hopen_integration_beat
+    build: .
+    restart: unless-stopped
+    command: celery -A core beat -l debug --scheduler django_celery_beat.schedulers:DatabaseScheduler --max-interval 10
+    env_file:
+      - .env
+    depends_on:
+      db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_started
+      celery_worker:
+        condition: service_started
+
+  rabbitmq:
+    container_name: hopen_integration_rabbitmq
+    image: rabbitmq:3-management
+    ports:
+      - "5672:5672"
+      - "15672:15672"
